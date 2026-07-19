@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from bank_reconciliation import SmartBankReconciliationManager
 from db_manager import BarberDatabaseManager
 from monthly_report_generator import MonthlyReportGenerator
+from transaction_history import get_transaction_history
 
 
 router = APIRouter(
@@ -90,6 +91,14 @@ def get_dashboard_summary(
         pattern="^(today|week|month)$",
     )
 ):
+    """
+    Return the main dashboard summary.
+
+    This endpoint intentionally remains limited to:
+    - today
+    - week
+    - month
+    """
     return BarberDatabaseManager.get_dashboard_summary(period)
 
 
@@ -154,6 +163,7 @@ def create_manual_booking(
             or "not available" in lower_error
         ):
             status_code = 409
+
         elif (
             "past" in lower_error
             or "invalid" in lower_error
@@ -162,6 +172,7 @@ def create_manual_booking(
             or "must begin" in lower_error
         ):
             status_code = 400
+
         else:
             status_code = 500
 
@@ -288,20 +299,81 @@ def get_dashboard_services():
 
 @router.get("/transactions")
 def get_dashboard_transactions(
+    period: str = Query(
+        default="last_30_days",
+        pattern=(
+            "^(last_7_days|last_30_days|this_month|last_month|"
+            "quarter|year|last_year|custom)$"
+        ),
+    ),
+    start_date: Optional[str] = Query(
+        default=None,
+        description=(
+            "Required when period=custom. "
+            "Use YYYY-MM-DD format."
+        ),
+    ),
+    end_date: Optional[str] = Query(
+        default=None,
+        description=(
+            "Required when period=custom. "
+            "Use YYYY-MM-DD format."
+        ),
+    ),
     limit: int = Query(
-        default=20,
+        default=500,
         ge=1,
-        le=500,
-    )
+        le=2000,
+    ),
 ):
-    transactions = BarberDatabaseManager.get_recent_transactions(
-        limit=limit
+    """
+    Return transaction history for the selected financial period.
+
+    Supported periods:
+    - last_7_days
+    - last_30_days
+    - this_month
+    - last_month
+    - quarter
+    - year
+    - last_year
+    - custom
+
+    Custom example:
+    /dashboard/transactions
+        ?period=custom
+        &start_date=2026-01-01
+        &end_date=2026-03-31
+    """
+    result = get_transaction_history(
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
     )
+
+    if not result.get("success"):
+        error_message = (
+            result.get("error")
+            or "Transaction history could not be retrieved."
+        )
+
+        raise HTTPException(
+            status_code=400,
+            detail=error_message,
+        )
 
     return {
         "success": True,
-        "count": len(transactions),
-        "transactions": transactions,
+        "period": result.get("period"),
+        "start_date": result.get("start_date"),
+        "end_date": result.get("end_date"),
+        "start_datetime": result.get("start_datetime"),
+        "end_datetime": result.get("end_datetime"),
+        "count": len(result.get("transactions") or []),
+        "summary": result.get("summary"),
+        "transactions": result.get("transactions") or [],
+        "error": None,
     }
 
 
