@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     HTTPException,
     Query,
@@ -14,6 +15,10 @@ from pydantic import BaseModel, Field
 from bank_reconciliation import SmartBankReconciliationManager
 from db_manager import BarberDatabaseManager
 from monthly_report_generator import MonthlyReportGenerator
+from tenant_context import (
+    TenantContext,
+    get_tenant_context,
+)
 from transaction_history import get_transaction_history
 
 
@@ -21,6 +26,21 @@ router = APIRouter(
     prefix="/dashboard",
     tags=["Dashboard"],
 )
+
+
+@router.get("/workspace")
+def get_current_workspace(
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    return {
+        "success": True,
+        "workspace": {
+            "business_id": tenant.business_id,
+            "business_name": tenant.business_name,
+            "role": tenant.role,
+            "user_id": tenant.user_id,
+        },
+    }
 
 
 # ------------------------------------------------------------------
