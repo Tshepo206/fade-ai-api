@@ -122,13 +122,42 @@ class BarberDatabaseManager:
     def has_pending_transaction(phone_number: str) -> bool:
         return BarberDatabaseManager.get_pending_transaction(phone_number) is not None
 
+    # ------------------------------------------------------------------
+    # CLIENTS / CUSTOMER MANAGEMENT
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def normalise_phone_number(phone_number: str) -> str:
+        """Return a consistent digits-only phone number."""
+        if not phone_number:
+            return ""
+
+        clean_phone = "".join(
+            character
+            for character in str(phone_number)
+            if character.isdigit()
+        )
+
+        if clean_phone.startswith("0") and len(clean_phone) == 10:
+            clean_phone = f"27{clean_phone[1:]}"
+
+        return clean_phone
+
     @staticmethod
     def get_client(phone_number: str):
         try:
+            clean_phone = BarberDatabaseManager.normalise_phone_number(
+                phone_number
+            )
+
+            if not clean_phone:
+                return None
+
             response = (
                 supabase.table("clients")
                 .select("*")
-                .eq("phone_number", phone_number)
+                .eq("phone_number", clean_phone)
+                .limit(1)
                 .execute()
             )
 
@@ -142,23 +171,120 @@ class BarberDatabaseManager:
             return None
 
     @staticmethod
-    def upsert_client(phone_number: str, first_name: str) -> bool:
+    def get_all_clients(
+        search_term: str = None,
+        limit: int = 100,
+    ) -> list:
+        """Return clients, including manually added clients with no revenue yet."""
         try:
-            clean_name = first_name.strip().title()
+            safe_limit = max(1, min(int(limit or 100), 500))
 
-            supabase.table("clients").upsert(
-                {
-                    "phone_number": phone_number,
-                    "first_name": clean_name,
-                },
-                on_conflict="phone_number",
-            ).execute()
+            query = (
+                supabase.table("clients")
+                .select("*")
+                .order("first_name")
+                .limit(safe_limit)
+            )
 
-            return True
+            if search_term and search_term.strip():
+                query = query.ilike(
+                    "first_name",
+                    f"%{search_term.strip()}%",
+                )
+
+            response = query.execute()
+            return response.data or []
 
         except Exception as error:
-            print(f"Client save failed: {error}")
-            return False
+            print(f"Customer-list lookup failed: {error}")
+            return []
+
+    @staticmethod
+    def create_or_update_client(
+        phone_number: str,
+        first_name: str,
+        email: str = None,
+        notes: str = None,
+    ) -> dict:
+        """Create or update a client directly in Supabase."""
+        try:
+            clean_phone = BarberDatabaseManager.normalise_phone_number(
+                phone_number
+            )
+            clean_name = (first_name or "").strip().title()
+            clean_email = (email or "").strip().lower()
+            clean_notes = (notes or "").strip()
+
+            if not clean_phone:
+                return {
+                    "success": False,
+                    "error": "A valid phone number is required.",
+                    "customer": None,
+                }
+
+            if len(clean_phone) < 10:
+                return {
+                    "success": False,
+                    "error": "The phone number is too short.",
+                    "customer": None,
+                }
+
+            if not clean_name:
+                return {
+                    "success": False,
+                    "error": "The customer's name is required.",
+                    "customer": None,
+                }
+
+            customer_data = {
+                "phone_number": clean_phone,
+                "first_name": clean_name,
+            }
+
+            if clean_email:
+                customer_data["email"] = clean_email
+
+            if clean_notes:
+                customer_data["notes"] = clean_notes
+
+            response = (
+                supabase.table("clients")
+                .upsert(
+                    customer_data,
+                    on_conflict="phone_number",
+                )
+                .execute()
+            )
+
+            if not response.data:
+                return {
+                    "success": False,
+                    "error": "Supabase did not return the saved customer.",
+                    "customer": None,
+                }
+
+            return {
+                "success": True,
+                "error": None,
+                "customer": response.data[0],
+            }
+
+        except Exception as error:
+            print(f"Customer save failed: {error}")
+            return {
+                "success": False,
+                "error": str(error),
+                "customer": None,
+            }
+
+    @staticmethod
+    def upsert_client(phone_number: str, first_name: str) -> bool:
+        """Backwards-compatible wrapper used by the WhatsApp flow."""
+        result = BarberDatabaseManager.create_or_update_client(
+            phone_number=phone_number,
+            first_name=first_name,
+        )
+        return bool(result.get("success"))
 
     @staticmethod
     def fetch_services() -> list:
@@ -620,6 +746,208 @@ class BarberDatabaseManager:
     # ------------------------------------------------------------------
     # BOOKINGS
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def create_manual_booking(
+        phone_number: str,
+        customer_name: str,
+        service_id: int,
+        appointment_timestamp: str,
+        customer_email: str = None,
+        customer_notes: str = None,
+    ) -> dict:
+        """Create/update the customer, booking, and availability slot in Supabase."""
+        try:
+            clean_phone = BarberDatabaseManager.normalise_phone_number(
+                phone_number
+            )
+            clean_name = (customer_name or "").strip().title()
+
+            if not clean_phone:
+                return {
+                    "success": False,
+                    "error": "A valid customer phone number is required.",
+                    "booking": None,
+                    "customer": None,
+                }
+
+            if not clean_name:
+                return {
+                    "success": False,
+                    "error": "The customer's name is required.",
+                    "booking": None,
+                    "customer": None,
+                }
+
+            try:
+                clean_service_id = int(service_id)
+            except (TypeError, ValueError):
+                return {
+                    "success": False,
+                    "error": "A valid service must be selected.",
+                    "booking": None,
+                    "customer": None,
+                }
+
+            service = BarberDatabaseManager.get_service_by_id(clean_service_id)
+            if not service:
+                return {
+                    "success": False,
+                    "error": "The selected service does not exist.",
+                    "booking": None,
+                    "customer": None,
+                }
+
+            try:
+                appointment_dt = datetime.fromisoformat(
+                    str(appointment_timestamp).replace("Z", "+00:00")
+                )
+                if appointment_dt.tzinfo is not None:
+                    appointment_dt = appointment_dt.replace(tzinfo=None)
+                appointment_dt = appointment_dt.replace(second=0, microsecond=0)
+            except (TypeError, ValueError):
+                return {
+                    "success": False,
+                    "error": "The appointment date and time are invalid.",
+                    "booking": None,
+                    "customer": None,
+                }
+
+            if appointment_dt <= datetime.utcnow():
+                return {
+                    "success": False,
+                    "error": "A booking cannot be created in the past.",
+                    "booking": None,
+                    "customer": None,
+                }
+
+            if appointment_dt.minute not in (0, 30):
+                return {
+                    "success": False,
+                    "error": "Appointments must begin on the hour or half-hour.",
+                    "booking": None,
+                    "customer": None,
+                }
+
+            clean_timestamp = appointment_dt.isoformat()
+
+            customer_result = BarberDatabaseManager.create_or_update_client(
+                phone_number=clean_phone,
+                first_name=clean_name,
+                email=customer_email,
+                notes=customer_notes,
+            )
+
+            if not customer_result.get("success"):
+                return {
+                    "success": False,
+                    "error": customer_result.get("error")
+                    or "The customer could not be saved.",
+                    "booking": None,
+                    "customer": None,
+                }
+
+            existing_slot_response = (
+                supabase.table("availability_slots")
+                .select("*")
+                .eq("slot_datetime", clean_timestamp)
+                .limit(1)
+                .execute()
+            )
+            existing_slot = (
+                existing_slot_response.data[0]
+                if existing_slot_response.data
+                else None
+            )
+
+            if existing_slot:
+                slot_status = str(existing_slot.get("status") or "").upper()
+                if slot_status == "BLOCKED":
+                    return {
+                        "success": False,
+                        "error": "The selected time is blocked.",
+                        "booking": None,
+                        "customer": customer_result.get("customer"),
+                    }
+                if slot_status == "BOOKED":
+                    return {
+                        "success": False,
+                        "error": "The selected time is already booked.",
+                        "booking": None,
+                        "customer": customer_result.get("customer"),
+                    }
+            else:
+                if not BarberDatabaseManager.create_availability_slot(
+                    clean_timestamp
+                ):
+                    return {
+                        "success": False,
+                        "error": "The availability slot could not be created.",
+                        "booking": None,
+                        "customer": customer_result.get("customer"),
+                    }
+
+            if not BarberDatabaseManager.is_slot_available(clean_timestamp):
+                return {
+                    "success": False,
+                    "error": "The selected time is not available.",
+                    "booking": None,
+                    "customer": customer_result.get("customer"),
+                }
+
+            booking_data = {
+                "phone_number": clean_phone,
+                "service_id": clean_service_id,
+                "appointment_timestamp": clean_timestamp,
+                "status": "PENDING",
+            }
+
+            booking_response = (
+                supabase.table("bookings")
+                .insert(booking_data)
+                .execute()
+            )
+            if not booking_response.data:
+                return {
+                    "success": False,
+                    "error": "The booking could not be saved.",
+                    "booking": None,
+                    "customer": customer_result.get("customer"),
+                }
+
+            booking = booking_response.data[0]
+            booking_id = booking.get("id")
+
+            if not BarberDatabaseManager.book_slot(clean_timestamp, booking_id):
+                supabase.table("bookings").update(
+                    {"status": "CANCELLED"}
+                ).eq("id", booking_id).execute()
+                return {
+                    "success": False,
+                    "error": "The booking was created, but the slot could not be reserved.",
+                    "booking": None,
+                    "customer": customer_result.get("customer"),
+                }
+
+            enriched_bookings = BarberDatabaseManager._enrich_bookings([booking])
+            enriched_booking = enriched_bookings[0] if enriched_bookings else booking
+
+            return {
+                "success": True,
+                "error": None,
+                "booking": enriched_booking,
+                "customer": customer_result.get("customer"),
+                "service": service,
+            }
+
+        except Exception as error:
+            print(f"Manual booking creation failed: {error}")
+            return {
+                "success": False,
+                "error": str(error),
+                "booking": None,
+                "customer": None,
+            }
 
     @staticmethod
     def insert_booking(phone_number: str, service_id: int, timestamp_str: str) -> dict:
