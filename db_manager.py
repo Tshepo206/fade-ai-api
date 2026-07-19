@@ -48,6 +48,54 @@ class BarberDatabaseManager:
             }
 
     @staticmethod
+    def ensure_client_session(
+        phone_number: str,
+        source: str = "MANUAL",
+    ) -> bool:
+        """Ensure a client_sessions row exists before creating a booking."""
+        try:
+            clean_phone = BarberDatabaseManager.normalise_phone_number(
+                phone_number
+            )
+
+            if not clean_phone:
+                print("Client session creation failed: missing phone number.")
+                return False
+
+            existing_response = (
+                supabase.table("client_sessions")
+                .select("phone_number")
+                .eq("phone_number", clean_phone)
+                .limit(1)
+                .execute()
+            )
+
+            if existing_response.data:
+                return True
+
+            session_data = {
+                "phone_number": clean_phone,
+                "current_state": "INITIAL_CONTACT",
+                "context_data": {
+                    "source": source,
+                    "created_manually": source.upper() == "MANUAL",
+                },
+                "last_interaction": datetime.utcnow().isoformat(),
+            }
+
+            insert_response = (
+                supabase.table("client_sessions")
+                .insert(session_data)
+                .execute()
+            )
+
+            return bool(insert_response.data)
+
+        except Exception as error:
+            print(f"Client session creation failed: {error}")
+            return False
+
+    @staticmethod
     def update_session_state(phone_number: str, new_state: str, context_updates: dict = None) -> None:
         try:
             update_data = {
@@ -845,6 +893,22 @@ class BarberDatabaseManager:
                     or "The customer could not be saved.",
                     "booking": None,
                     "customer": None,
+                }
+
+            session_ready = BarberDatabaseManager.ensure_client_session(
+                phone_number=clean_phone,
+                source="MANUAL",
+            )
+
+            if not session_ready:
+                return {
+                    "success": False,
+                    "error": (
+                        "The customer was saved, but the required "
+                        "client session could not be created."
+                    ),
+                    "booking": None,
+                    "customer": customer_result.get("customer"),
                 }
 
             existing_slot_response = (
