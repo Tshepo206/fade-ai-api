@@ -486,10 +486,9 @@ async def receive_whatsapp_webhook(
                 f"{transcript}"
             )
 
-            # This owner-router call will become tenant-aware
-            # in the next migration step.
             owner_response = (
                 handle_typed_bookkeeping(
+                    business_id=business_id,
                     phone_number=sender_phone,
                     message_text=transcript,
                 )
@@ -553,10 +552,9 @@ async def receive_whatsapp_webhook(
                 "[Owner Router] Routing owner message"
             )
 
-            # This owner-router call will become tenant-aware
-            # in the next migration step.
             owner_response = (
                 handle_owner_text_message(
+                    business_id=business_id,
                     phone_number=sender_phone,
                     message_text=user_message,
                 )
