@@ -90,16 +90,54 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertIn(("business_id", self.business_a), equalities(db.queries[0]))
         self.assertIn(("slot_id", 99), equalities(db.queries[0]))
 
-    def test_ledger_and_summary_are_isolated(self):
+    def test_empty_business_summary_does_not_include_other_business_transactions(self):
         db = Supabase([])
         with patch.object(ledger_manager, "supabase", db):
-            ledger_manager.LedgerManager.record_transaction(self.business_a, "Same", "Fade", 100, "Card")
-        insert = next(call for call in db.queries[0].calls if call[0] == "insert")
+            ledger_manager.LedgerManager.record_transaction(
+                self.business_a, "Same", "Fade", 100, "Card"
+            )
+
+        insert = next(
+            call for call in db.queries[0].calls if call[0] == "insert"
+        )
         self.assertEqual(insert[1][0]["business_id"], self.business_a)
-        with patch.object(dashboard_analytics_manager.LedgerManager, "get_transactions_for_range",
-                          side_effect=lambda business_id, *_: [{"credit_amount": 100, "debit_amount": 0, "payment_method": "Card"}] if business_id == self.business_a else [{"credit_amount": 200, "debit_amount": 0, "payment_method": "Cash"}]):
-            self.assertEqual(dashboard_analytics_manager.DashboardAnalyticsManager.get_dashboard_summary(self.business_a)["revenue"], 100)
-            self.assertEqual(dashboard_analytics_manager.DashboardAnalyticsManager.get_dashboard_summary(self.business_b)["revenue"], 200)
+
+        def transactions_for_business(business_id, *_):
+            if business_id == self.business_a:
+                return [
+                    {
+                        "credit_amount": 100,
+                        "debit_amount": 25,
+                        "payment_method": "Card",
+                    }
+                ]
+
+            return []
+
+        with patch.object(
+            dashboard_analytics_manager.LedgerManager,
+            "get_transactions_for_range",
+            side_effect=transactions_for_business,
+        ) as transactions:
+            business_a_summary = (
+                dashboard_analytics_manager.DashboardAnalyticsManager
+                .get_dashboard_summary(self.business_a)
+            )
+            business_b_summary = (
+                dashboard_analytics_manager.DashboardAnalyticsManager
+                .get_dashboard_summary(self.business_b)
+            )
+
+        self.assertEqual(business_a_summary["revenue"], 100)
+        self.assertEqual(business_a_summary["expenses"], 25)
+        self.assertEqual(business_a_summary["transactions"], 1)
+        self.assertEqual(business_b_summary["revenue"], 0)
+        self.assertEqual(business_b_summary["expenses"], 0)
+        self.assertEqual(business_b_summary["transactions"], 0)
+        self.assertEqual(
+            [call.args[0] for call in transactions.call_args_list],
+            [self.business_a, self.business_b],
+        )
 
     def test_report_and_reconciliation_receive_tenant(self):
         with patch.object(report_manager, "MonthlyReportGenerator") as reports, \
