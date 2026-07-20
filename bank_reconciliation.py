@@ -6,18 +6,21 @@ from typing import List, Dict
 
 from pypdf import PdfReader
 
-from db_manager import BarberDatabaseManager
+from ledger_manager import LedgerManager
 
 
 class SmartBankReconciliationManager:
     @staticmethod
-    def reconcile_statement(filename: str, file_bytes: bytes, period: str = "month") -> dict:
+    def reconcile_statement(business_id: str, filename: str, file_bytes: bytes, period: str = "month") -> dict:
         bank_transactions = SmartBankReconciliationManager._parse_file(
             filename=filename,
             file_bytes=file_bytes,
         )
 
-        ledger_transactions = BarberDatabaseManager.get_recent_transactions(limit=500)
+        if not business_id:
+            raise ValueError("A business workspace is required.")
+
+        ledger_transactions = LedgerManager.get_recent_transactions(business_id, limit=500)
 
         matches = []
         unmatched_bank = []

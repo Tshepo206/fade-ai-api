@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from db_manager import supabase
+from ledger_manager import LedgerManager
 
 
 SUPPORTED_TRANSACTION_PERIODS = {
@@ -144,6 +144,7 @@ def get_transaction_date_range(
 
 
 def get_transactions_for_range(
+    business_id: str,
     start_datetime: datetime,
     end_datetime: datetime,
     limit: int = 500,
@@ -151,17 +152,9 @@ def get_transactions_for_range(
     """Retrieve ledger records within a date range."""
     safe_limit = max(1, min(int(limit or 500), 2000))
 
-    response = (
-        supabase.table("financial_ledger")
-        .select("*")
-        .gte("transaction_timestamp", start_datetime.isoformat())
-        .lt("transaction_timestamp", end_datetime.isoformat())
-        .order("transaction_timestamp", desc=True)
-        .limit(safe_limit)
-        .execute()
+    return LedgerManager.get_transactions_for_range(
+        business_id, start_datetime, end_datetime, safe_limit
     )
-
-    return response.data or []
 
 
 def calculate_transaction_summary(transactions: list) -> dict:
@@ -227,6 +220,7 @@ def calculate_transaction_summary(transactions: list) -> dict:
 
 
 def get_transaction_history(
+    business_id: str,
     period: str = "last_30_days",
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -245,7 +239,11 @@ def get_transaction_history(
             end_date=end_date,
         )
 
+        if not business_id:
+            raise ValueError("A business workspace is required.")
+
         transactions = get_transactions_for_range(
+            business_id=business_id,
             start_datetime=date_range["query_start"],
             end_datetime=date_range["query_end"],
             limit=limit,

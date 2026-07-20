@@ -184,6 +184,7 @@ class CustomerManager:
     def get_top_customers(
         business_id: str,
         period_start: Optional[str] = None,
+        period_end: Optional[str] = None,
         limit: int = 10,
     ) -> list:
         try:
@@ -205,6 +206,12 @@ class CustomerManager:
                 query = query.gte(
                     "transaction_timestamp",
                     period_start,
+                )
+
+            if period_end:
+                query = query.lt(
+                    "transaction_timestamp",
+                    period_end,
                 )
 
             response = query.execute()

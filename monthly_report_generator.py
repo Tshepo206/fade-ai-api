@@ -12,22 +12,26 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-from db_manager import BarberDatabaseManager
+from dashboard_analytics_manager import DashboardAnalyticsManager
 
 
 class MonthlyReportGenerator:
     @staticmethod
-    def generate_monthly_pdf() -> str:
+    def generate_monthly_pdf(
+        business_id: str,
+        business_name: str = "GoodKeeper Workspace",
+    ) -> str:
         os.makedirs("generated_reports", exist_ok=True)
 
         month_name = datetime.utcnow().strftime("%B_%Y")
-        file_path = f"generated_reports/kg_barber_monthly_report_{month_name}.pdf"
+        safe_business_id = "".join(character for character in business_id if character.isalnum() or character in "-_")
+        file_path = f"generated_reports/{safe_business_id}_monthly_report_{month_name}.pdf"
 
-        report = BarberDatabaseManager.get_monthly_report()
+        report = DashboardAnalyticsManager.get_monthly_report(business_id)
         summary = report.get("summary", {})
         services = report.get("revenue_by_service", [])
         customers = report.get("top_customers", [])
-        recommendations = BarberDatabaseManager.get_ai_recommendations("month")
+        recommendations = DashboardAnalyticsManager.get_ai_recommendations(business_id, "month")
 
         doc = SimpleDocTemplate(
             file_path,
@@ -69,7 +73,7 @@ class MonthlyReportGenerator:
 
         story = []
 
-        story.append(Paragraph("KG Barber Monthly Business Report", title_style))
+        story.append(Paragraph(f"{business_name} Monthly Business Report", title_style))
         story.append(Paragraph(datetime.utcnow().strftime("%B %Y"), body_style))
         story.append(Spacer(1, 16))
 
