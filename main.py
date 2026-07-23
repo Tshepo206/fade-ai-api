@@ -43,13 +43,43 @@ app = FastAPI(
     ),
 )
 
+def get_allowed_origins() -> list[str]:
+    """
+    Build the CORS allow-list from environment variables whose names start
+    with FRONTEND_URL_.
+
+    Example environment variables:
+        FRONTEND_URL_LOCAL=http://localhost:3000
+        FRONTEND_URL_LOCAL_ALT=http://localhost:3001
+        FRONTEND_URL_PREVIEW=https://fade-dashboard-qrdyk.sevalla.app
+        FRONTEND_URL_PRODUCTION=https://goodkeeper.syntaxcfo.co.za
+    """
+    configured_origins = {
+        value.strip().rstrip("/")
+        for key, value in os.environ.items()
+        if key.startswith("FRONTEND_URL_") and value.strip()
+    }
+
+    if not configured_origins:
+        configured_origins = {
+            "http://localhost:3000",
+            "http://localhost:3001",
+        }
+
+    allowed_origins = sorted(configured_origins)
+
+    print("\n========== CORS ==========")
+    print("Allowed origins:")
+    for origin in allowed_origins:
+        print(f" - {origin}")
+    print("==========================\n")
+
+    return allowed_origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://fade-dashboard-qrdyk.sevalla.app",
-    ],
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
