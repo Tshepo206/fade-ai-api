@@ -61,7 +61,7 @@ class BillingManager:
             "currency": "ZAR",
 
             "callback_url": (
-                "https://goodkeeper.syntaxcfo.co.za/billing"
+                "https://goodkeeper.syntaxcfo.co.za/onboarding"
             ),
 
             "metadata": {
