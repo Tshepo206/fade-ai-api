@@ -20,6 +20,7 @@ class BarberAgentState(TypedDict):
     business_id: str
     phone_number: str
     current_state: str
+    booking_event: Optional[str]
     incoming_text: str
     weather_summary: str
     day_of_week: str
@@ -644,6 +645,7 @@ def slot_selection_node(state: BarberAgentState) -> dict:
 
         return {
             "current_state": "BOOKED",
+            "booking_event": "created",
             "validated_time": chosen_time,
             "customer_name": customer_name,
             "text_response": create_booking_confirmation(
@@ -912,6 +914,7 @@ def collecting_name_node(state: BarberAgentState) -> dict:
 
     return {
         "current_state": "BOOKED",
+        "booking_event": "created",
         "customer_name": customer_name,
         "text_response": create_booking_confirmation(
             customer_name,

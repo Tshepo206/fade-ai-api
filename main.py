@@ -116,6 +116,11 @@ class OutboundResponseSchema(BaseModel):
     current_state: str
     voice_note_script: Optional[str] = None
     text_response: str
+    booking_event: Optional[str] = None
+    customer_name: Optional[str] = None
+    selected_service: Optional[str] = None
+    validated_date: Optional[str] = None
+    validated_time: Optional[str] = None
 
 
 @app.get("/")
@@ -228,6 +233,41 @@ def send_whatsapp_message(
     response.raise_for_status()
 
     return response
+
+def send_owner_booking_notification(
+    business: dict,
+    customer_name: str,
+    service_name: str,
+    booking_date: str,
+    booking_time: str,
+):
+    owner_phone = str(
+        business.get("owner_phone_number") or ""
+    ).strip()
+
+    if not owner_phone:
+        print("[Owner Notification] No owner phone number configured.")
+        return
+
+    message = (
+        "📅 *New booking*\n\n"
+        f"Customer: {customer_name}\n"
+        f"Service: {service_name}\n"
+        f"Date: {booking_date}\n"
+        f"Time: {booking_time}\n\n"
+        "The appointment has been added to your GoodKeeper calendar."
+    )
+
+    send_whatsapp_message(
+        to_number=owner_phone,
+        message_text=message,
+        whatsapp_phone_number_id=business.get(
+            "whatsapp_phone_number_id"
+        ),
+        whatsapp_access_token=business.get(
+            "whatsapp_access_token"
+        ),
+    )
 
 
 def resolve_webhook_business(
@@ -379,16 +419,30 @@ def process_agent_message(
         )
 
     return OutboundResponseSchema(
-        current_state=next_system_state,
-        voice_note_script=result_state.get(
-            "voice_note_script"
-        ),
-        text_response=result_state.get(
-            "text_response",
-            "",
-        ),
-    )
-
+    current_state=next_system_state,
+    voice_note_script=result_state.get(
+        "voice_note_script"
+    ),
+    text_response=result_state.get(
+        "text_response",
+        "",
+    ),
+    booking_event=result_state.get(
+        "booking_event"
+    ),
+    customer_name=result_state.get(
+        "customer_name"
+    ),
+    selected_service=result_state.get(
+        "selected_service"
+    ),
+    validated_date=result_state.get(
+        "validated_date"
+    ),
+    validated_time=result_state.get(
+        "validated_time"
+    ),
+)
 
 @app.post("/webhook/whatsapp")
 async def receive_whatsapp_webhook(
@@ -625,6 +679,48 @@ async def receive_whatsapp_webhook(
             business_id=business_id,
             payload=payload_for_agent,
         )
+
+        if agent_response.booking_event == "created":
+            send_owner_booking_notification(
+                business=business,
+                customer_name=(
+                    agent_response.customer_name
+                    or "Customer"
+                ),
+                service_name=(
+                    agent_response.selected_service
+                    or "Barber Service"
+                ),
+                booking_date=(
+                    agent_response.validated_date
+                    or "Unknown date"
+                ),
+                booking_time=(
+                    agent_response.validated_time
+                    or "Unknown time"
+                ),
+            )
+
+        if getattr(agent_response, "booking_event", None) == "created":
+            send_owner_booking_notification(
+                business=business,
+                customer_name=(
+                    getattr(agent_response, "customer_name", None)
+                    or "Customer"
+                ),
+                service_name=(
+                    getattr(agent_response, "selected_service", None)
+                    or "Barber Service"
+                ),
+                booking_date=(
+                    getattr(agent_response, "validated_date", None)
+                    or "Unknown date"
+                ),
+                booking_time=(
+                    getattr(agent_response, "validated_time", None)
+                    or "Unknown time"
+                ),
+            )
 
         send_whatsapp_message(
             to_number=sender_phone,
