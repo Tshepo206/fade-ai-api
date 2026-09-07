@@ -2,6 +2,10 @@ import os
 from datetime import datetime
 from typing import Optional
 
+import hashlib
+import hmac
+import json
+
 import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -19,6 +23,8 @@ from personality import get_time_of_day
 from session_manager import SessionManager
 from voice_processor import process_whatsapp_voice_note
 from whatsapp_tenant_manager import WhatsAppTenantManager
+
+from billing_manager import BillingManager
 
 
 VERIFY_TOKEN = os.getenv(
@@ -121,6 +127,10 @@ class OutboundResponseSchema(BaseModel):
     selected_service: Optional[str] = None
     validated_date: Optional[str] = None
     validated_time: Optional[str] = None
+
+class SubscriptionCheckoutRequest(BaseModel):
+    email: str
+    business_id: str
 
 
 @app.get("/")
@@ -812,6 +822,77 @@ def route_transaction_to_agent(
                 f"{str(error)}"
             ),
         ) from error
+    
+@app.post("/billing/initialize-subscription")
+def initialize_subscription(
+    payload: SubscriptionCheckoutRequest,
+):
+    result = BillingManager.initialize_subscription(
+        email=payload.email,
+        business_id=payload.business_id,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get(
+                "error",
+                "Unable to initialize subscription.",
+            ),
+        )
+
+    return result
+
+@app.post("/webhook/paystack")
+async def paystack_webhook(request: Request):
+    secret_key = os.getenv("PAYSTACK_SECRET_KEY")
+
+    if not secret_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Paystack secret key is not configured.",
+        )
+
+    raw_body = await request.body()
+
+    received_signature = request.headers.get(
+        "x-paystack-signature"
+    )
+
+    expected_signature = hmac.new(
+        secret_key.encode("utf-8"),
+        raw_body,
+        hashlib.sha512,
+    ).hexdigest()
+
+    if not received_signature or not hmac.compare_digest(
+        received_signature,
+        expected_signature,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Paystack signature.",
+        )
+
+    event = json.loads(raw_body.decode("utf-8"))
+
+    event_type = event.get("event")
+    data = event.get("data") or {}
+
+    print(
+        "[Paystack Webhook] Event:",
+        event_type,
+    )
+
+    print(
+        "[Paystack Webhook] Data:",
+        data,
+    )
+
+    return {
+        "status": "received",
+        "event": event_type,
+    }
 
 
 if __name__ == "__main__":
@@ -821,3 +902,4 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
     )
+
