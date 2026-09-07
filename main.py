@@ -241,12 +241,27 @@ def send_owner_booking_notification(
     booking_date: str,
     booking_time: str,
 ):
+    recipients = []
+
     owner_phone = str(
         business.get("owner_phone_number") or ""
     ).strip()
 
-    if not owner_phone:
-        print("[Owner Notification] No owner phone number configured.")
+    if owner_phone:
+        recipients.append(owner_phone)
+
+    monitoring_phone = str(
+        os.getenv("GOODKEEPER_MONITORING_PHONE") or ""
+    ).strip()
+
+    if monitoring_phone and monitoring_phone not in recipients:
+        recipients.append(monitoring_phone)
+
+    if not recipients:
+        print(
+            "[Owner Notification] "
+            "No notification recipients configured."
+        )
         return
 
     message = (
@@ -258,17 +273,17 @@ def send_owner_booking_notification(
         "The appointment has been added to your GoodKeeper calendar."
     )
 
-    send_whatsapp_message(
-        to_number=owner_phone,
-        message_text=message,
-        whatsapp_phone_number_id=business.get(
-            "whatsapp_phone_number_id"
-        ),
-        whatsapp_access_token=business.get(
-            "whatsapp_access_token"
-        ),
-    )
-
+    for recipient in recipients:
+        send_whatsapp_message(
+            to_number=recipient,
+            message_text=message,
+            whatsapp_phone_number_id=business.get(
+                "whatsapp_phone_number_id"
+            ),
+            whatsapp_access_token=business.get(
+                "whatsapp_access_token"
+            ),
+        )
 
 def resolve_webhook_business(
     value: dict,
