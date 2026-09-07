@@ -540,7 +540,7 @@ def date_selection_node(state: BarberAgentState) -> dict:
             "voice_note_script": None,
         }
 
-    slots_to_show = available_slots[:8]
+    slots_to_show = available_slots
     slot_text = "\n".join(
         f"{index + 1}. {slot}"
         for index, slot in enumerate(slots_to_show)
@@ -583,7 +583,7 @@ def slot_selection_node(state: BarberAgentState) -> dict:
         business_id,
         target_date,
     )
-    slots_to_show = available_slots[:8]
+    slots_to_show = available_slots
 
     try:
         slot_index = int(text) - 1
@@ -711,7 +711,7 @@ def reschedule_date_node(state: BarberAgentState) -> dict:
             "voice_note_script": None,
         }
 
-    slots_to_show = available_slots[:8]
+    slots_to_show = available_slots
     slot_text = "\n".join(
         f"{index + 1}. {slot}"
         for index, slot in enumerate(slots_to_show)
@@ -777,7 +777,7 @@ def reschedule_slot_node(state: BarberAgentState) -> dict:
         business_id,
         target_date,
     )
-    slots_to_show = available_slots[:8]
+    slots_to_show = available_slots
 
     try:
         slot_index = int(text) - 1
