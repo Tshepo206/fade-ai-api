@@ -52,15 +52,23 @@ class BillingManager:
 
         payload = {
             "email": email,
-            "plan": PAYSTACK_PLAN_CODE,
+
+            # R1 authorization/tokenization charge.
+            # We intentionally DO NOT send the Paystack plan here,
+            # otherwise the customer would be charged R699 immediately.
+            "amount": 100,
+
             "currency": "ZAR",
+
             "callback_url": (
                 "https://goodkeeper.syntaxcfo.co.za/billing"
             ),
+
             "metadata": {
                 "business_id": business_id,
                 "product": "GoodKeeper",
                 "plan": "GoodKeeper Standard",
+                "purpose": "trial_payment_method_setup",
             },
         }
 
@@ -132,6 +140,7 @@ class BillingManager:
 
         metadata = data.get("metadata") or {}
         business_id = metadata.get("business_id")
+        purpose = metadata.get("purpose")
 
         if not business_id:
             print(
@@ -148,6 +157,269 @@ class BillingManager:
         authorization = data.get("authorization") or {}
         plan_object = data.get("plan_object") or {}
 
+        customer_code = customer.get("customer_code")
+        authorization_code = authorization.get(
+            "authorization_code"
+        )
+
+        # =====================================================
+        # TRIAL PAYMENT METHOD SETUP
+        # =====================================================
+
+        if purpose == "trial_payment_method_setup":
+            print(
+                "[Billing] Trial payment method setup received "
+                "for business:",
+                business_id,
+            )
+
+            try:
+                existing_response = (
+                    supabase
+                    .table("billing_subscriptions")
+                    .select("*")
+                    .eq("business_id", business_id)
+                    .maybe_single()
+                    .execute()
+                )
+
+                existing = existing_response.data or {}
+
+                trial_end = existing.get("trial_end")
+
+                if not trial_end:
+                    return {
+                        "success": False,
+                        "error": (
+                            "Trial end date is not configured."
+                        ),
+                    }
+
+                if not customer_code:
+                    return {
+                        "success": False,
+                        "error": (
+                            "Paystack customer code is missing."
+                        ),
+                    }
+
+                if not authorization_code:
+                    return {
+                        "success": False,
+                        "error": (
+                            "Reusable Paystack authorization "
+                            "was not returned."
+                        ),
+                    }
+
+                # Save the real live customer/card authorization
+                # immediately.
+                authorization_record = {
+                    "business_id": business_id,
+                    "provider": "paystack",
+                    "plan_name": "GoodKeeper Standard",
+                    "plan_code": PAYSTACK_PLAN_CODE,
+                    "customer_email": customer.get("email"),
+                    "customer_code": customer_code,
+                    "authorization_code": authorization_code,
+                    "card_brand": (
+                        authorization.get("brand")
+                        or authorization.get("card_type")
+                    ),
+                    "card_last4": authorization.get("last4"),
+                    "status": "trialing",
+                    "last_payment_reference": data.get(
+                        "reference"
+                    ),
+                    "last_payment_at": (
+                        data.get("paid_at")
+                        or data.get("paidAt")
+                    ),
+                    "updated_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+                }
+
+                (
+                    supabase
+                    .table("billing_subscriptions")
+                    .upsert(
+                        authorization_record,
+                        on_conflict="business_id",
+                    )
+                    .execute()
+                )
+
+                # Protect against Paystack webhook retries.
+                # If we already created a subscription, do not
+                # create another one.
+                existing_subscription_code = existing.get(
+                    "subscription_code"
+                )
+
+                if existing_subscription_code:
+                    print(
+                        "[Billing] Subscription already exists:",
+                        existing_subscription_code,
+                    )
+
+                    return {
+                        "success": True,
+                        "business_id": business_id,
+                        "subscription_code": (
+                            existing_subscription_code
+                        ),
+                    }
+
+                subscription_payload = {
+                    "customer": customer_code,
+                    "plan": PAYSTACK_PLAN_CODE,
+                    "authorization": authorization_code,
+                    "start_date": trial_end,
+                }
+
+                subscription_response = requests.post(
+                    "https://api.paystack.co/subscription",
+                    headers={
+                        "Authorization": (
+                            f"Bearer {PAYSTACK_SECRET_KEY}"
+                        ),
+                        "Content-Type": "application/json",
+                    },
+                    json=subscription_payload,
+                    timeout=30,
+                )
+
+                subscription_result = (
+                    subscription_response.json()
+                )
+
+                print(
+                    "[Billing] Paystack subscription response:",
+                    subscription_result,
+                )
+
+                if (
+                    not subscription_response.ok
+                    or not subscription_result.get("status")
+                ):
+                    return {
+                        "success": False,
+                        "error": subscription_result.get(
+                            "message",
+                            (
+                                "Unable to create delayed "
+                                "Paystack subscription."
+                            ),
+                        ),
+                    }
+
+                subscription_data = (
+                    subscription_result.get("data") or {}
+                )
+
+                subscription_code = (
+                    subscription_data.get(
+                        "subscription_code"
+                    )
+                )
+
+                email_token = subscription_data.get(
+                    "email_token"
+                )
+
+                next_payment_date = (
+                    subscription_data.get(
+                        "next_payment_date"
+                    )
+                    or trial_end
+                )
+
+                final_record = {
+                    "business_id": business_id,
+                    "subscription_code": subscription_code,
+                    "email_token": email_token,
+                    "next_payment_date": next_payment_date,
+                    "billing_start_date": trial_end,
+                    "status": "trialing",
+                    "updated_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+                }
+
+                response = (
+                    supabase
+                    .table("billing_subscriptions")
+                    .upsert(
+                        final_record,
+                        on_conflict="business_id",
+                    )
+                    .execute()
+                )
+
+                print(
+                    "[Billing] Trial subscription created:",
+                    response.data,
+                )
+
+                # Refund the R1 card verification charge.
+                transaction_reference = data.get("reference")
+
+                if transaction_reference:
+                    try:
+                        refund_response = requests.post(
+                            "https://api.paystack.co/refund",
+                            headers={
+                                "Authorization": (
+                                    f"Bearer {PAYSTACK_SECRET_KEY}"
+                                ),
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "transaction": transaction_reference,
+                                "customer_note": (
+                                    "GoodKeeper card verification refund"
+                                ),
+                                "merchant_note": (
+                                    "Automatic refund of trial "
+                                    "payment-method verification charge"
+                                ),
+                            },
+                            timeout=30,
+                        )
+
+                        refund_result = refund_response.json()
+
+                        print(
+                            "[Billing] Verification refund response:",
+                            refund_result,
+                        )
+
+                    except Exception as refund_error:
+                        print(
+                            "[Billing] Verification refund failed:",
+                            refund_error,
+                        )
+
+                return {
+                    "success": True,
+                    "business_id": business_id,
+                    "subscription_code": subscription_code,
+                    "status": "trialing",
+                }
+
+            except Exception as error:
+                print(
+                    "[Billing] Trial setup failed:",
+                    error,
+                )
+
+                raise
+
+        # =====================================================
+        # NORMAL SUBSCRIPTION PAYMENT
+        # =====================================================
+
         billing_record = {
             "business_id": business_id,
             "provider": "paystack",
@@ -161,18 +433,20 @@ class BillingManager:
             "plan_code": (
                 plan_object.get("plan_code")
                 or data.get("plan")
+                or PAYSTACK_PLAN_CODE
             ),
 
             "customer_email": customer.get("email"),
-            "customer_code": customer.get("customer_code"),
+            "customer_code": customer_code,
 
             "status": "active",
 
-            # Paystack amounts are in the smallest currency unit.
-            # For ZAR, 69900 = R699.00.
+            # Paystack amount is in cents.
             "amount": data.get("amount"),
 
             "currency": data.get("currency") or "ZAR",
+
+            "authorization_code": authorization_code,
 
             "card_brand": (
                 authorization.get("brand")
@@ -205,7 +479,7 @@ class BillingManager:
             )
 
             print(
-                "[Billing] Subscription activated for business:",
+                "[Billing] Subscription payment recorded for:",
                 business_id,
             )
 
@@ -213,6 +487,47 @@ class BillingManager:
                 "[Billing] Supabase result:",
                 response.data,
             )
+
+            # Refund the R1 card verification charge.
+            transaction_reference = data.get("reference")
+
+            if transaction_reference:
+                try:
+                    refund_response = requests.post(
+                        "https://api.paystack.co/refund",
+                        headers={
+                            "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "transaction": transaction_reference,
+                            "customer_note": "GoodKeeper card verification refund",
+                            "merchant_note": (
+                                "Automatic refund of trial "
+                                "payment-method verification charge"
+                            ),
+                        },
+                        timeout=30,
+                    )
+
+                    refund_result = refund_response.json()
+
+                    print(
+                        "[Billing] Verification refund response:",
+                        refund_result,
+                    )
+
+                except Exception as refund_error:
+                    print(
+                        "[Billing] Verification refund failed:",
+                        refund_error,
+                    )
+
+
+            return {
+                "success": True,
+                "business_id": business_id,
+            }
 
             return {
                 "success": True,
