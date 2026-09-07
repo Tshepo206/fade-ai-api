@@ -256,3 +256,189 @@ class BillingManager:
                 "success": False,
                 "error": str(error),
             }
+        
+    @staticmethod
+    def get_billing_profile(
+        business_id: str,
+    ) -> dict:
+        try:
+            response = (
+                supabase
+                .table("billing_profiles")
+                .select("*")
+                .eq("business_id", business_id)
+                .maybe_single()
+                .execute()
+            )
+
+            return {
+                "success": True,
+                "profile": response.data,
+            }
+
+        except Exception as error:
+            print(
+                "[Billing] Failed to fetch billing profile:",
+                error,
+            )
+
+            return {
+                "success": False,
+                "error": str(error),
+            }
+
+    @staticmethod
+    def upsert_billing_profile(
+        business_id: str,
+        billing_name: str,
+        billing_email: str,
+        billing_phone: str | None = None,
+        address_line_1: str | None = None,
+        address_line_2: str | None = None,
+        city: str | None = None,
+        province: str | None = None,
+        postal_code: str | None = None,
+        country: str = "ZA",
+        company_registration_number: str | None = None,
+        vat_number: str | None = None,
+    ) -> dict:
+        if not billing_name:
+            return {
+                "success": False,
+                "error": "Billing name is required.",
+            }
+
+        if not billing_email:
+            return {
+                "success": False,
+                "error": "Billing email is required.",
+            }
+
+        billing_record = {
+            "business_id": business_id,
+            "billing_name": billing_name,
+            "billing_email": billing_email,
+            "billing_phone": billing_phone,
+            "address_line_1": address_line_1,
+            "address_line_2": address_line_2,
+            "city": city,
+            "province": province,
+            "postal_code": postal_code,
+            "country": country or "ZA",
+            "company_registration_number": (
+                company_registration_number
+            ),
+            "vat_number": vat_number,
+            "updated_at": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        }
+
+        try:
+            response = (
+                supabase
+                .table("billing_profiles")
+                .upsert(
+                    billing_record,
+                    on_conflict="business_id",
+                )
+                .execute()
+            )
+
+            return {
+                "success": True,
+                "profile": (
+                    response.data[0]
+                    if response.data
+                    else billing_record
+                ),
+            }
+
+        except Exception as error:
+            print(
+                "[Billing] Failed to save billing profile:",
+                error,
+            )
+
+            return {
+                "success": False,
+                "error": str(error),
+            }
+
+    @staticmethod
+    def get_manage_subscription_link(
+        business_id: str,
+    ) -> dict:
+        try:
+            subscription_response = (
+                supabase
+                .table("billing_subscriptions")
+                .select(
+                    "subscription_code,"
+                    "customer_code,"
+                    "email_token"
+                )
+                .eq("business_id", business_id)
+                .maybe_single()
+                .execute()
+            )
+
+            subscription = (
+                subscription_response.data or {}
+            )
+
+            subscription_code = subscription.get(
+                "subscription_code"
+            )
+
+            if not subscription_code:
+                return {
+                    "success": False,
+                    "error": (
+                        "Subscription management is not "
+                        "available yet because the Paystack "
+                        "subscription code has not been saved."
+                    ),
+                }
+
+            response = requests.get(
+                (
+                    "https://api.paystack.co/subscription/"
+                    f"{subscription_code}/manage/link"
+                ),
+                headers={
+                    "Authorization": (
+                        f"Bearer {PAYSTACK_SECRET_KEY}"
+                    ),
+                },
+                timeout=30,
+            )
+
+            data = response.json()
+
+            if not response.ok or not data.get("status"):
+                return {
+                    "success": False,
+                    "error": data.get(
+                        "message",
+                        "Unable to create subscription management link.",
+                    ),
+                }
+
+            manage_data = data.get("data") or {}
+
+            return {
+                "success": True,
+                "link": manage_data.get("link"),
+            }
+
+        except Exception as error:
+            print(
+                "[Billing] Failed to generate management link:",
+                error,
+            )
+
+            return {
+                "success": False,
+                "error": str(error),
+            }

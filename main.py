@@ -132,6 +132,19 @@ class SubscriptionCheckoutRequest(BaseModel):
     email: str
     business_id: str
 
+class BillingProfileRequest(BaseModel):
+    billing_name: str
+    billing_email: str
+    billing_phone: Optional[str] = None
+    address_line_1: Optional[str] = None
+    address_line_2: Optional[str] = None
+    city: Optional[str] = None
+    province: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: str = "ZA"
+    company_registration_number: Optional[str] = None
+    vat_number: Optional[str] = None
+
 
 @app.get("/")
 def check_health():
@@ -920,6 +933,77 @@ async def paystack_webhook(request: Request):
         "status": "received",
         "event": event_type,
     }
+
+@app.get("/billing/profile/{business_id}")
+def get_billing_profile(business_id: str):
+    result = BillingManager.get_billing_profile(
+        business_id=business_id,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=500,
+            detail=result.get(
+                "error",
+                "Unable to fetch billing profile.",
+            ),
+        )
+
+    return result
+
+
+@app.put("/billing/profile/{business_id}")
+def update_billing_profile(
+    business_id: str,
+    payload: BillingProfileRequest,
+):
+    result = BillingManager.upsert_billing_profile(
+        business_id=business_id,
+        billing_name=payload.billing_name,
+        billing_email=payload.billing_email,
+        billing_phone=payload.billing_phone,
+        address_line_1=payload.address_line_1,
+        address_line_2=payload.address_line_2,
+        city=payload.city,
+        province=payload.province,
+        postal_code=payload.postal_code,
+        country=payload.country,
+        company_registration_number=(
+            payload.company_registration_number
+        ),
+        vat_number=payload.vat_number,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get(
+                "error",
+                "Unable to save billing profile.",
+            ),
+        )
+
+    return result
+
+
+@app.post("/billing/manage-subscription/{business_id}")
+def manage_subscription(
+    business_id: str,
+):
+    result = BillingManager.get_manage_subscription_link(
+        business_id=business_id,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get(
+                "error",
+                "Unable to open subscription management.",
+            ),
+        )
+
+    return result
 
 
 if __name__ == "__main__":
