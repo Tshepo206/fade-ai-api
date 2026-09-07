@@ -889,6 +889,16 @@ async def paystack_webhook(request: Request):
         data,
     )
 
+    billing_result = BillingManager.handle_paystack_event(
+        event_type=event_type,
+        data=data,
+    )
+
+    print(
+        "[Paystack Webhook] Billing result:",
+        billing_result,
+    )
+
     return {
         "status": "received",
         "event": event_type,
