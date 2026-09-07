@@ -226,3 +226,33 @@ class BillingManager:
             )
 
             raise
+
+    @staticmethod
+    def get_subscription(
+        business_id: str,
+    ) -> dict:
+        try:
+            response = (
+                supabase
+                .table("billing_subscriptions")
+                .select("*")
+                .eq("business_id", business_id)
+                .maybe_single()
+                .execute()
+            )
+
+            return {
+                "success": True,
+                "subscription": response.data,
+            }
+
+        except Exception as error:
+            print(
+                "[Billing] Failed to fetch subscription:",
+                error,
+            )
+
+            return {
+                "success": False,
+                "error": str(error),
+            }

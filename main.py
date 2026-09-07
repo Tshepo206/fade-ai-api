@@ -843,6 +843,23 @@ def initialize_subscription(
 
     return result
 
+@app.get("/billing/subscription/{business_id}")
+def get_billing_subscription(business_id: str):
+    result = BillingManager.get_subscription(
+        business_id=business_id,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=500,
+            detail=result.get(
+                "error",
+                "Unable to fetch billing subscription.",
+            ),
+        )
+
+    return result
+
 @app.post("/webhook/paystack")
 async def paystack_webhook(request: Request):
     secret_key = os.getenv("PAYSTACK_SECRET_KEY")
