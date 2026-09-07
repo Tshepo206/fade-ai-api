@@ -2,13 +2,17 @@ import os
 import requests
 
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 from supabase import create_client
 
+
+load_dotenv()
 
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
 PAYSTACK_PLAN_CODE = os.getenv("PAYSTACK_PLAN_CODE")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY")
+
 
 supabase = create_client(
     SUPABASE_URL,
@@ -38,6 +42,12 @@ class BillingManager:
             return {
                 "success": False,
                 "error": "Customer email is required.",
+            }
+
+        if not business_id:
+            return {
+                "success": False,
+                "error": "Business ID is required.",
             }
 
         payload = {
@@ -103,95 +113,13 @@ class BillingManager:
                 "success": False,
                 "error": "Unable to initialize subscription.",
             }
-        
-        @staticmethod
-        def handle_paystack_event(
-            event_type: str,
-            data: dict,
-        ) -> dict:
-            if event_type == "charge.success":
-                metadata = data.get("metadata") or {}
-                business_id = metadata.get("business_id")
 
-                if not business_id:
-                    print(
-                        "[Billing] charge.success has no business_id. "
-                        "Ignoring."
-                    )
-
-                    return {
-                        "success": True,
-                        "ignored": True,
-                    }
-
-                customer = data.get("customer") or {}
-                authorization = data.get("authorization") or {}
-                plan_object = data.get("plan_object") or {}
-
-                billing_record = {
-                    "business_id": business_id,
-                    "provider": "paystack",
-
-                    "plan_name": (
-                        plan_object.get("name")
-                        or metadata.get("plan")
-                        or "GoodKeeper Standard"
-                    ),
-
-                    "plan_code": (
-                        plan_object.get("plan_code")
-                        or data.get("plan")
-                    ),
-
-                    "customer_email": customer.get("email"),
-                    "customer_code": customer.get("customer_code"),
-
-                    "status": "active",
-
-                    # Paystack amounts are in cents
-                    "amount": data.get("amount"),
-
-                    "currency": data.get("currency") or "ZAR",
-
-                    "card_brand": (
-                        authorization.get("brand")
-                        or authorization.get("card_type")
-                    ),
-
-                    "card_last4": authorization.get("last4"),
-
-                    "last_payment_reference": data.get("reference"),
-
-                    "last_payment_at": (
-                        data.get("paid_at")
-                        or data.get("paidAt")
-                    ),
-
-                    "updated_at": datetime.now(
-                        timezone.utc
-                    ).isoformat(),
-                }
-
-                (
-                    supabase
-                    .table("billing_subscriptions")
-                    .upsert(
-                        billing_record,
-                        on_conflict="business_id",
-                    )
-                    .execute()
-                )
-
-                print(
-                    "[Billing] Subscription activated for business:",
-                    business_id,
-                )
-
-                return {
-                    "success": True,
-                    "business_id": business_id,
-                }
-
+    @staticmethod
+    def handle_paystack_event(
+        event_type: str,
+        data: dict,
+    ) -> dict:
+        if event_type != "charge.success":
             print(
                 "[Billing] Paystack event not handled:",
                 event_type,
@@ -201,3 +129,100 @@ class BillingManager:
                 "success": True,
                 "ignored": True,
             }
+
+        metadata = data.get("metadata") or {}
+        business_id = metadata.get("business_id")
+
+        if not business_id:
+            print(
+                "[Billing] charge.success has no business_id. "
+                "Ignoring."
+            )
+
+            return {
+                "success": True,
+                "ignored": True,
+            }
+
+        customer = data.get("customer") or {}
+        authorization = data.get("authorization") or {}
+        plan_object = data.get("plan_object") or {}
+
+        billing_record = {
+            "business_id": business_id,
+            "provider": "paystack",
+
+            "plan_name": (
+                plan_object.get("name")
+                or metadata.get("plan")
+                or "GoodKeeper Standard"
+            ),
+
+            "plan_code": (
+                plan_object.get("plan_code")
+                or data.get("plan")
+            ),
+
+            "customer_email": customer.get("email"),
+            "customer_code": customer.get("customer_code"),
+
+            "status": "active",
+
+            # Paystack amounts are in the smallest currency unit.
+            # For ZAR, 69900 = R699.00.
+            "amount": data.get("amount"),
+
+            "currency": data.get("currency") or "ZAR",
+
+            "card_brand": (
+                authorization.get("brand")
+                or authorization.get("card_type")
+            ),
+
+            "card_last4": authorization.get("last4"),
+
+            "last_payment_reference": data.get("reference"),
+
+            "last_payment_at": (
+                data.get("paid_at")
+                or data.get("paidAt")
+            ),
+
+            "updated_at": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        }
+
+        try:
+            response = (
+                supabase
+                .table("billing_subscriptions")
+                .upsert(
+                    billing_record,
+                    on_conflict="business_id",
+                )
+                .execute()
+            )
+
+            print(
+                "[Billing] Subscription activated for business:",
+                business_id,
+            )
+
+            print(
+                "[Billing] Supabase result:",
+                response.data,
+            )
+
+            return {
+                "success": True,
+                "business_id": business_id,
+            }
+
+        except Exception as error:
+            print(
+                "[Billing] Failed to persist subscription:",
+                error,
+            )
+
+            raise
