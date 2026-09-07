@@ -1,7 +1,7 @@
 import os
 import requests
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client
 
@@ -48,6 +48,64 @@ class BillingManager:
             return {
                 "success": False,
                 "error": "Business ID is required.",
+            }
+        
+        # Ensure the workspace has a billing subscription record
+        # before payment-method setup begins.
+        now = datetime.now(timezone.utc)
+        trial_end = now + timedelta(days=30)
+
+        try:
+            existing_response = (
+                supabase
+                .table("billing_subscriptions")
+                .select("*")
+                .eq("business_id", business_id)
+                .maybe_single()
+                .execute()
+            )
+
+            existing = existing_response.data
+
+            if not existing:
+                trial_record = {
+                    "business_id": business_id,
+                    "provider": "paystack",
+                    "plan_name": "GoodKeeper Standard",
+                    "plan_code": PAYSTACK_PLAN_CODE,
+                    "customer_email": email,
+                    "status": "trialing",
+                    "amount": 69900,
+                    "currency": "ZAR",
+                    "trial_start": now.isoformat(),
+                    "trial_end": trial_end.isoformat(),
+                    "billing_start_date": trial_end.isoformat(),
+                    "updated_at": now.isoformat(),
+                }
+
+                (
+                    supabase
+                    .table("billing_subscriptions")
+                    .insert(trial_record)
+                    .execute()
+                )
+
+                print(
+                    "[Billing] Trial record created for:",
+                    business_id,
+                )
+
+        except Exception as error:
+            print(
+                "[Billing] Failed to create trial record:",
+                error,
+            )
+
+            return {
+                "success": False,
+                "error": (
+                    "Unable to prepare the free trial."
+                ),
             }
 
         payload = {
