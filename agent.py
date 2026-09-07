@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo
+
 from datetime import datetime, timedelta
 from typing import Optional, TypedDict
 
@@ -69,21 +71,33 @@ def _normalise_datetime(value: str) -> datetime:
 def _generate_default_slots_for_day(
     business_id: str,
     target_date: str,
-    start_hour: int = 9,
-    end_hour: int = 18,
     interval_minutes: int = 30,
 ) -> None:
-    start_dt = datetime.fromisoformat(f"{target_date}T{start_hour:02d}:00:00")
-    end_dt = datetime.fromisoformat(f"{target_date}T{end_hour:02d}:00:00")
+    business_timezone = ZoneInfo("Africa/Johannesburg")
+
+    date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+
+    # Sunday closed
+    if date_obj.weekday() == 6:
+        return
+
+    start_dt = datetime.fromisoformat(
+        f"{target_date}T08:30:00"
+    ).replace(tzinfo=business_timezone)
+
+    end_dt = datetime.fromisoformat(
+        f"{target_date}T18:00:00"
+    ).replace(tzinfo=business_timezone)
+
     current = start_dt
 
     while current < end_dt:
         AvailabilityManager.create_slot(
             business_id=business_id,
-            slot_datetime=current.isoformat(),
+            slot_datetime=current.replace(tzinfo=None).isoformat(),
         )
-        current += timedelta(minutes=interval_minutes)
 
+        current += timedelta(minutes=interval_minutes)
 
 def get_available_times_for_date(
     business_id: str,
@@ -113,7 +127,8 @@ def get_available_times_for_date(
             end_datetime=end_dt.isoformat(),
         )
 
-    now = datetime.utcnow()
+    business_timezone = ZoneInfo("Africa/Johannesburg")
+    now = datetime.now(business_timezone)
     available_times = []
 
     for slot in slots:
@@ -130,7 +145,9 @@ def get_available_times_for_date(
         except (TypeError, ValueError):
             continue
 
-        if slot_dt <= now:
+        slot_dt_local = slot_dt.replace(tzinfo=business_timezone)
+
+        if slot_dt_local <= now:
             continue
 
         available_times.append(slot_dt.strftime("%H:%M"))
