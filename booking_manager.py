@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo
+
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -329,9 +331,18 @@ class BookingManager:
                 "error": "The appointment date and time are invalid.",
             }
 
+        business_timezone = ZoneInfo("Africa/Johannesburg")
+
         appointment = datetime.fromisoformat(timestamp)
 
-        if appointment <= datetime.utcnow():
+        if appointment.tzinfo is None:
+            appointment = appointment.replace(tzinfo=business_timezone)
+        else:
+            appointment = appointment.astimezone(business_timezone)
+
+        now = datetime.now(business_timezone)
+
+        if appointment <= now:
             return {
                 **empty,
                 "error": "A booking cannot be created in the past.",
@@ -552,9 +563,18 @@ class BookingManager:
             return {}
 
         try:
+            business_timezone = ZoneInfo("Africa/Johannesburg")
+
             appointment = datetime.fromisoformat(timestamp)
 
-            if appointment <= datetime.utcnow():
+            if appointment.tzinfo is None:
+                appointment = appointment.replace(tzinfo=business_timezone)
+            else:
+                appointment = appointment.astimezone(business_timezone)
+
+            now = datetime.now(business_timezone)
+
+            if appointment <= now:
                 print("Cannot create booking in the past.")
                 return {}
 
@@ -703,9 +723,18 @@ class BookingManager:
             return {}
 
         try:
+            business_timezone = ZoneInfo("Africa/Johannesburg")
+
             appointment = datetime.fromisoformat(timestamp)
 
-            if appointment <= datetime.utcnow():
+            if appointment.tzinfo is None:
+                appointment = appointment.replace(tzinfo=business_timezone)
+            else:
+                appointment = appointment.astimezone(business_timezone)
+
+            now = datetime.now(business_timezone)
+
+            if appointment <= now:
                 print("Cannot reschedule booking to the past.")
                 return {}
 

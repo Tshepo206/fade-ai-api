@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from db_manager import supabase
 
@@ -90,18 +91,25 @@ class BarberCalendarManager:
                         )
 
                     current += timedelta(minutes=30)
+                    
+           # KG Barber operates in South African time
+            business_timezone = ZoneInfo("Africa/Johannesburg")
+
+            # Sunday closed
+            if start_dt.weekday() == 6:
+                return []
 
             all_slots = []
 
             current_time = datetime.fromisoformat(
-                f"{target_date_str}T08:00:00"
-            )
+                f"{target_date_str}T08:30:00"
+            ).replace(tzinfo=business_timezone)
 
             closing_time = datetime.fromisoformat(
-                f"{target_date_str}T17:00:00"
-            )
+                f"{target_date_str}T18:00:00"
+            ).replace(tzinfo=business_timezone)
 
-            now = datetime.utcnow()
+            now = datetime.now(business_timezone)
 
             while current_time < closing_time:
                 slot_str = current_time.strftime("%H:%M")

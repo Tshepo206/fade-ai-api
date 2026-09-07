@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo
+
 from datetime import datetime, timedelta
 
 from db_manager import supabase
@@ -22,7 +24,19 @@ class AvailabilityManager:
 
     @staticmethod
     def is_slot_available(business_id: str, slot_datetime: str) -> bool:
-        if not business_id or datetime.fromisoformat(slot_datetime) <= datetime.utcnow():
+        if not business_id:
+            return False
+
+        business_timezone = ZoneInfo("Africa/Johannesburg")
+
+        slot_time = datetime.fromisoformat(slot_datetime)
+
+        if slot_time.tzinfo is None:
+            slot_time = slot_time.replace(tzinfo=business_timezone)
+        else:
+            slot_time = slot_time.astimezone(business_timezone)
+
+        if slot_time <= datetime.now(business_timezone):
             return False
         response = (
             supabase.table("availability_slots").select("slot_id")
