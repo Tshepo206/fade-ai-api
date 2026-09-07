@@ -263,12 +263,20 @@ def send_owner_booking_notification(
             "No notification recipients configured."
         )
         return
+    
+    try:
+        friendly_booking_date = datetime.strptime(
+            booking_date,
+            "%Y-%m-%d",
+        ).strftime("%A, %d %B %Y")
+    except ValueError:
+        friendly_booking_date = booking_date
 
     message = (
         "📅 *New booking*\n\n"
         f"Customer: {customer_name}\n"
         f"Service: {service_name}\n"
-        f"Date: {booking_date}\n"
+        f"Date: {friendly_booking_date}\n"
         f"Time: {booking_time}\n\n"
         "The appointment has been added to your GoodKeeper calendar."
     )
