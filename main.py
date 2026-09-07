@@ -701,27 +701,6 @@ async def receive_whatsapp_webhook(
                 ),
             )
 
-        if getattr(agent_response, "booking_event", None) == "created":
-            send_owner_booking_notification(
-                business=business,
-                customer_name=(
-                    getattr(agent_response, "customer_name", None)
-                    or "Customer"
-                ),
-                service_name=(
-                    getattr(agent_response, "selected_service", None)
-                    or "Barber Service"
-                ),
-                booking_date=(
-                    getattr(agent_response, "validated_date", None)
-                    or "Unknown date"
-                ),
-                booking_time=(
-                    getattr(agent_response, "validated_time", None)
-                    or "Unknown time"
-                ),
-            )
-
         send_whatsapp_message(
             to_number=sender_phone,
             message_text=(
